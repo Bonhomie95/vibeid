@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "Vibe ID",
+    "slug": "vibe-id",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "vibeid",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "dev.bonhomieinc.vibeid",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Vibe ID needs camera access to capture your selfie and analyze your aesthetic.",
+        "NSPhotoLibraryUsageDescription": "Vibe ID needs photo library access to upload an existing photo for analysis."
+      },
+      "associatedDomains": ["applinks:vibeid.app"]
+    },
+    "android": {
+      "package": "dev.bonhomieinc.vibeid",
+      "permissions": ["CAMERA", "READ_MEDIA_IMAGES"],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": ["BROWSABLE", "DEFAULT"],
+          "data": [{ "scheme": "vibeid" }]
+        }
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Vibe ID needs photo access so you can upload a selfie for analysis.",
+          "cameraPermission": "Vibe ID needs camera access to take a selfie for analysis."
+        }
+      ]
+    ],
+    "experiments": { "typedRoutes": true },
+    "extra": {
+      "apiBaseUrl": "http://192.168.100.47:4000"
+    }
+  }
+}
