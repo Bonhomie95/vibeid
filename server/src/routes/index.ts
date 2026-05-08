@@ -4,7 +4,6 @@ import {
   analyzeVibe,
   getHistory,
   getResult,
-  listArchetypes,
   getArchetype,
   getDistribution,
 } from '../controllers/vibeController';
@@ -27,8 +26,9 @@ router.post('/auth/signup', a(signup));
 router.post('/auth/login', a(login));
 router.get('/auth/me', requireAuth, a(me));
 
-// archetypes
-router.get('/archetypes', a(listArchetypes));
+// archetypes — only stats and by-id metadata are public.
+// There is intentionally no list-all endpoint: users discover archetypes
+// through their own reading and through their friends, never as a menu.
 router.get('/archetypes/distribution', a(getDistribution));
 router.get('/archetypes/:id', a(getArchetype));
 

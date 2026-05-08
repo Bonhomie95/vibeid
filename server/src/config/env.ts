@@ -40,6 +40,13 @@ export const config = {
   imageProvider: optional('IMAGE_PROVIDER', 'pollinations'),
   mockAi: bool('MOCK_AI', false),
   freeDailyReads: int('FREE_DAILY_READS', 1),
+  // Optional person matching. When 'clip', anonymous analyses are deduped
+  // by image embedding similarity so the same person gets the same vibe.
+  // Run scripts/embed-server.py to provide the endpoint.
+  personMatching: optional('PERSON_MATCHING', 'off'), // 'off' | 'clip'
+  embedUrl: optional('EMBED_URL', 'http://127.0.0.1:5050/embed'),
+  // Cosine sim above this returns the prior archetype.
+  embedSimThreshold: parseFloat(optional('EMBED_SIM_THRESHOLD', '0.92')),
 } as const;
 
 export function isProd() {

@@ -26,14 +26,17 @@ export default function ProfileScreen() {
       setUser(meRes.user);
       setHistory(histRes.results);
       setFriends(frRes.friends);
-      // Lazy-load archetype meta for any unique archetypes in history
+      // Lazy-load archetype meta only for ids we actually reference.
       const ids = new Set<string>();
       histRes.results.forEach((r) => ids.add(r.primaryArchetype));
       meRes.user.primaryArchetype && ids.add(meRes.user.primaryArchetype);
       const newMap = new Map(archetypeMap);
+      const missing = [...ids].filter((id) => !newMap.has(id));
       const { archetypeApi } = await import('../lib/api');
-      const all = await archetypeApi.list();
-      all.archetypes.forEach((a) => newMap.set(a.id, a));
+      const fetched = await Promise.all(
+        missing.map((id) => archetypeApi.get(id).then((r) => r.archetype).catch(() => null))
+      );
+      fetched.forEach((a) => { if (a) newMap.set(a.id, a); });
       setArchetypeMap(newMap);
     } catch (e: unknown) {
       const err = e as ApiException;
@@ -101,6 +104,13 @@ export default function ProfileScreen() {
                     <View key={i} style={[s.swatch, { backgroundColor: c }]} />
                   ))}
                 </View>
+                <Pressable
+                  onPress={() => router.push({ pathname: '/capture', params: { force: '1' } })}
+                  style={s.rereadBtn}
+                  hitSlop={8}
+                >
+                  <Text style={s.reread}>re-read my vibe →</Text>
+                </Pressable>
               </>
             ) : (
               <>
@@ -194,6 +204,8 @@ const s = StyleSheet.create({
   paletteRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
   swatch: { width: 22, height: 22, borderRadius: 11, borderWidth: 1, borderColor: theme.border },
   cta: { color: theme.accent, fontSize: 16, marginTop: 8 },
+  rereadBtn: { marginTop: 14, alignSelf: 'flex-start' },
+  reread: { color: theme.textMuted, fontSize: 13, letterSpacing: 0.5 },
   section: { marginTop: 40 },
   sectionHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 },
   sectionTitle: {

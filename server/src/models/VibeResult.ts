@@ -9,6 +9,10 @@ export interface IVibeResult extends Document {
   essenceWords: string[];
   palette: string[];
   cardImageUrl: string | null;
+  // Optional CLIP embedding (length 512). Used to dedupe anonymous reads
+  // of the same person across different photos. Null when person
+  // matching is disabled.
+  embedding: number[] | null;
   createdAt: Date;
   toJSONSafe(): VibeResultJSON;
 }
@@ -36,6 +40,7 @@ const VibeResultSchema = new Schema<IVibeResult>(
     essenceWords: { type: [String], default: [] },
     palette: { type: [String], default: [] },
     cardImageUrl: { type: String, default: null },
+    embedding: { type: [Number], default: null, select: false }, // not returned by default
   },
   { timestamps: { createdAt: 'createdAt', updatedAt: false } }
 );

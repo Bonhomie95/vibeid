@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, Alert } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,8 +9,12 @@ import { vibeApi, ApiException } from '../lib/api';
 
 export default function CaptureScreen() {
   const router = useRouter();
+  const { force } = useLocalSearchParams<{ force?: string }>();
+  const isForceReread = force === '1';
   const [loading, setLoading] = useState(false);
-  const [loadingLabel, setLoadingLabel] = useState('Reading your vibe…');
+  const [loadingLabel, setLoadingLabel] = useState(
+    isForceReread ? 'Re-reading your vibe…' : 'Reading your vibe…'
+  );
 
   async function pickFromCamera() {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
@@ -63,7 +67,7 @@ export default function CaptureScreen() {
         idx = (idx + 1) % labels.length;
         setLoadingLabel(labels[idx]);
       }, 1800);
-      const r = await vibeApi.analyze(base64, mime);
+      const r = await vibeApi.analyze(base64, { mimeType: mime, force: isForceReread });
       clearInterval(tick);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace({ pathname: '/result/[id]', params: { id: r.result.id } });

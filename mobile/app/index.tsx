@@ -57,9 +57,7 @@ export default function HomeScreen() {
         </View>
 
         <View style={s.footer}>
-          <Pressable onPress={() => router.push('/explore')}>
-            <Text style={s.footerLink}>browse archetypes →</Text>
-          </Pressable>
+          <Text style={s.footerLink}>your vibe is waiting</Text>
         </View>
       </SafeAreaView>
     </View>

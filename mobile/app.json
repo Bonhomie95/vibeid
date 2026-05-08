@@ -39,7 +39,7 @@
     ],
     "experiments": { "typedRoutes": true },
     "extra": {
-      "apiBaseUrl": "http://192.168.100.47:4000"
+      "apiBaseUrl": "http://192.168.100.54:4000"
     }
   }
 }

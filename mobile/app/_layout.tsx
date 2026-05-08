@@ -12,7 +12,7 @@ export default function RootLayout() {
     const url =
       (Constants.expoConfig?.extra?.apiBaseUrl as string | undefined) ||
       (process.env.EXPO_PUBLIC_API_URL as string | undefined) ||
-      'http://192.168.100.47:4000';
+      'http://192.168.100.54:4000';
     configureApi(url);
   }, []);
 

@@ -17,20 +17,26 @@ npm test                            # client/server contract test
 npm start                           # then press i (iOS) or a (Android)
 ```
 
+## What's new
+
+- **Archetype catalog hidden.** No "browse archetypes" screen. Users discover archetypes through their own reading and through their friends. The mystery is the magic.
+- **Identity lock-in.** Once you have a vibe, it sticks. Different photo, same archetype, fresh poetic reasoning.
+- **Re-read my vibe.** A subtle button on profile that passes `force=true` to the analyze endpoint, bypassing lock-in for users who want a fresh take.
+
 ## Routes
 
 | Path | Screen |
 |---|---|
 | `/` | Hero / Find My Vibe / Sign in |
-| `/capture` | Take selfie or upload, then analyze |
+| `/capture` | Take selfie or upload, then analyze. Accepts `?force=1` for re-read. |
 | `/result/[id]` | Shareable VibeCard + reasoning + share button |
 | `/auth` | Signup / login |
-| `/profile` | Your archetype + history + friends list |
-| `/explore` | All archetypes + distribution % |
-| `/archetype/[id]` | Single archetype detail page |
+| `/profile` | Your archetype + history + friends list + Re-read button |
 | `/friends` | Add by username + clash inline |
 | `/friend/[username]` | Friend's latest vibe |
 | `/clash/[username]` | Full-screen compatibility reveal |
+
+There is no `/explore` and no `/archetype/:id` browsable directory — archetypes are revealed through use, not previewed from a menu.
 
 ## Architecture
 
@@ -38,12 +44,10 @@ npm start                           # then press i (iOS) or a (Android)
 app/                         expo-router file-based routing
   _layout.tsx                root layout, configures API base url
   index.tsx                  hero
-  capture.tsx                ImagePicker + analyze flow
+  capture.tsx                ImagePicker + analyze flow (supports ?force=1)
   result/[id].tsx            shareable VibeCard + ViewShot capture
   auth.tsx                   email + username + password
-  profile.tsx                user / history / friends
-  explore.tsx                all archetypes grid
-  archetype/[id].tsx         archetype detail
+  profile.tsx                user / history / friends / re-read
   friends.tsx                add + list + inline clash
   friend/[username]/index.tsx friend's latest vibe
   clash/[username].tsx       full-screen clash reveal
@@ -60,17 +64,8 @@ test/
 
 ## Sharing
 
-The result card uses `react-native-view-shot` to rasterize the React component into a PNG, then `expo-sharing` opens the system share sheet. On the wider web we'd point friends at `/r/<id>` which redirects into the app via the `vibeid://` scheme + `applinks:vibeid.app` association already declared in `app.json`.
+The result card uses `react-native-view-shot` to rasterize the React component into a PNG, then `expo-sharing` opens the system share sheet.
 
 ## Token storage
 
-`lib/storage.ts` writes the JWT to AsyncStorage on device and an in-memory Map in Node. Login / signup automatically persist — `authApi.hasToken()` lets the home screen show "My Profile" instead of "Sign in" on next launch.
-
-## Production hardening to add
-
-- Replace the hardcoded `apiBaseUrl` with a build-time env (`EXPO_PUBLIC_API_URL`) wired into EAS profiles.
-- Re-render the card server-side for share parity (see backend README — Puppeteer pipeline).
-- Add a "your vibe history" timeline visualization.
-- Wire RevenueCat for Premium IAPs.
-- Add Sentry / PostHog for crash + funnel analytics.
-- Push notifications via Expo Notifications + FCM.
+`lib/storage.ts` writes the JWT to AsyncStorage on device and an in-memory Map in Node tests. Login / signup automatically persist — `authApi.hasToken()` lets the home screen show "My Profile" instead of "Sign in" on next launch.

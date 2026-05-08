@@ -36,6 +36,10 @@ export interface AnalyzeResponse {
   result: VibeResultJSON;
   archetype: ArchetypeMeta | null;
   secondaryArchetypeMeta: ArchetypeMeta | null;
+  /** True if the result was kept from a prior reading (identity lock). */
+  lockedIn?: boolean;
+  /** When set, the prior result id this was matched against (anonymous flow). */
+  matchedFrom?: string | null;
 }
 
 export interface AuthResponse {

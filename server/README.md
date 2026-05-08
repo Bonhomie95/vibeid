@@ -1,6 +1,6 @@
 # Vibe ID — backend
 
-Node.js + Express + TypeScript + MongoDB API for the Vibe ID app. Classifies user selfies into 36 cultural aesthetic archetypes (Dark Academia, Old Money, Soft Life, …) using a Groq vision model, and generates an aesthetic art card via Pollinations.
+Node.js + Express + TypeScript + MongoDB API for the Vibe ID app. Classifies user selfies into 50 cultural aesthetic archetypes (Dark Academia, Old Money, Soft Life, Hyperpop, Cyber Goth, …) using a Groq vision model, and generates an aesthetic art card via Pollinations.
 
 ## Quick start
 
@@ -11,16 +11,42 @@ cp .env.example .env
 
 npm install
 npm run dev          # tsx watch
-npm test             # full unit + parser + HTTP integration suite
+npm test             # 375 assertions across unit/parser/HTTP suites
 npm run typecheck
 npm run build && npm start
 ```
 
-Defaults:
-- `PORT=4000`
-- `MONGO_URI=mongodb://127.0.0.1:27017/vibe_id`
-- `IMAGE_PROVIDER=pollinations` (free, no key)
-- `GROQ_VISION_MODEL=meta-llama/llama-4-scout-17b-16e-instruct`
+## What's new in this version
+
+### Hidden archetype catalog
+
+The `/api/archetypes` list-all endpoint is gone. Users discover archetypes through their own reading and through their friends — never as a browsable menu. The catalog is the magic; revealing it ahead of time would dilute the result. Only `/api/archetypes/:id` (for hydrating a specific result) and `/api/archetypes/distribution` (for stats) remain. The internal `signals` field used by the AI classifier is never exposed in API responses.
+
+### Identity lock-in (the "same person, same vibe" guarantee)
+
+For logged-in users, once you have a primary archetype, every subsequent `/vibe/analyze` returns *that* archetype with a fresh poetic reasoning blurb. The classifier still runs (so the reasoning is responsive to the new photo), but the archetype itself is locked. To get a new one, pass `force: true` — the "Re-read my vibe" button on profile.
+
+### Person-aware prompt
+
+The classifier prompt was rewritten to read **the person**, not the photo. It explicitly tells the model to treat photo lighting, blur, resolution, and cropping as noise, and instead read presence, gaze, posture, and styling intent. Same person taking different photos now lands on the same archetype far more reliably.
+
+### Optional CLIP person matching for anonymous reads
+
+When `PERSON_MATCHING=clip`, the backend POSTs each anonymous selfie to a local CLIP embedding endpoint (`scripts/embed-server.py` — runs on Apple Silicon, ~150MB model, ~200ms per image) and stores the 512-dim embedding with the result. On future anonymous analyses, cosine similarity > `EMBED_SIM_THRESHOLD` (default 0.92) returns the prior archetype. **Off by default** — logged-in identity-lock alone solves 95% of the case. Turn this on if you have many anonymous users across devices.
+
+To enable:
+
+```bash
+cd vibe-id-backend
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r scripts/requirements.txt
+python scripts/embed-server.py    # http://127.0.0.1:5050
+
+# in .env:
+PERSON_MATCHING=clip
+```
+
+The embed server uses MPS automatically on Apple Silicon (M1/M2/M3/M4/M5).
 
 ## Architecture
 
@@ -30,30 +56,34 @@ src/
     env.ts          environment loader
     db.ts           Mongoose connect/disconnect
   data/
-    archetypes.ts   the 36-archetype catalog (id, palette, essence, prompt, signals)
+    archetypes.ts   the 50-archetype catalog (id, palette, essence, prompt, signals)
   models/
     User.ts         Mongoose user schema + bcrypt + JWT-safe serializer
-    VibeResult.ts   classification result, owned by user or anonymous
+    VibeResult.ts   classification result, with optional 512-dim embedding
     Friend.ts       canonical-pair friendship model
   services/
     groq.ts         Groq vision classification + defensive JSON parsing
     imageGen.ts     Pollinations URL builder for archetype art card
+    embed.ts        Optional CLIP embedding client + cosine similarity
     auth.ts         JWT sign / verify
   middleware/
     auth.ts         requireAuth + optionalAuth
     error.ts        HttpError + JSON error responses
   controllers/
     authController.ts
-    vibeController.ts
+    vibeController.ts    classify + lock-in logic
     friendsController.ts
   routes/
     index.ts        all endpoints wired up
   server.ts         createApp() + main()
+scripts/
+  embed-server.py        local CLIP embedding service (Apple Silicon ready)
+  requirements.txt       Python deps for embed server
 test/
-  unit.ts           archetype catalog + image URL builder + mock classifier
-  groq-parsing.ts   defensive JSON parsing edge cases
-  run.ts            full HTTP integration suite (in-memory mongo stand-in)
-  inMemoryStore.ts  test-only mongoose stand-in
+  unit.ts                archetype catalog + image URL builder + mock classifier
+  groq-parsing.ts        defensive JSON parsing edge cases
+  run.ts                 full HTTP integration suite (in-memory mongo stand-in)
+  inMemoryStore.ts       test-only mongoose stand-in
 ```
 
 ## API endpoints
@@ -61,13 +91,12 @@ test/
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET  | /api/health | – | liveness |
-| GET  | /api/archetypes | – | list all archetypes |
-| GET  | /api/archetypes/:id | – | one archetype |
-| GET  | /api/archetypes/distribution | – | % of users per archetype |
+| GET  | /api/archetypes/:id | – | one archetype meta (no internal signals) |
+| GET  | /api/archetypes/distribution | – | % of users per archetype (users-only) |
 | POST | /api/auth/signup | – | `{email, username, password}` → `{token, user}` |
 | POST | /api/auth/login | – | `{email, password}` → `{token, user}` |
 | GET  | /api/auth/me | bearer | current user |
-| POST | /api/vibe/analyze | optional | `{imageBase64}` → classify + art card url |
+| POST | /api/vibe/analyze | optional | `{imageBase64, force?}` → classify + art card url + `lockedIn` flag |
 | GET  | /api/vibe/history | bearer | last N results for the user |
 | GET  | /api/vibe/result/:id | – | shareable single result |
 | POST | /api/friends/add | bearer | `{username}` |
@@ -75,29 +104,30 @@ test/
 | GET  | /api/friends/:username/vibe | bearer | friend's latest vibe |
 | GET  | /api/friends/clash?with=username | bearer | compatibility score + blurb |
 
+`/api/archetypes` (list-all) is intentionally not exposed.
+
 ## Daily quota
 
-Non-premium users get `FREE_DAILY_READS` analyses per UTC day. Anonymous users have no quota (no account = no row to count). Set `FREE_DAILY_READS` in `.env`.
+Non-premium users get `FREE_DAILY_READS` analyses per UTC day. Anonymous users have no quota. The quota check happens before classification, so `force=true` re-reads count against it. Set `FREE_DAILY_READS` in `.env`.
 
-## Image generation
-
-Pollinations is keyless and free, fine for testing. To switch to FLUX via Replicate later, add a Replicate path in `services/imageGen.ts` and set `IMAGE_PROVIDER=replicate`.
-
-## Testing without Groq or Mongo
-
-Setting `MOCK_AI=true` in `.env` skips the live Groq call and returns a deterministic archetype derived from the image bytes. The test suite uses an in-memory mongoose stand-in so it runs even without a local MongoDB.
+## Testing
 
 ```bash
-npm test    # 280 assertions, all passing
+npm test    # 375 assertions:
+            #   314 unit (archetypes catalog + URL builder + mock classifier)
+            #    11 groq parser edge cases
+            #    50 HTTP integration (every endpoint, lock-in, force, quota)
 ```
+
+The HTTP suite uses an in-memory mongoose stand-in so tests run with no MongoDB binary on the host.
 
 ## Production hardening to add
 
 - Real card-image rendering pipeline (Puppeteer or node-canvas) to bake the archetype name + palette + 3 essence words into the generated art for share-ready PNGs.
 - Replicate (FLUX) for image generation in production. Cache 10–20 variations per archetype.
+- For person matching at scale, swap the embedding cosine loop for a vector index (Atlas Vector Search, pgvector, Pinecone).
 - Rate limit middleware (per IP for anonymous, per user for authed).
 - Image moderation pass before classification (reject NSFW / minors).
 - S3 / R2 upload for raw selfies if you want to keep them; otherwise discard after classify.
 - Apple / Google IAP receipt validation for premium upgrades.
-- Push notifications via Expo + FCM for "your monthly vibe is ready" prompts.
 - Sentry / pino structured logging.

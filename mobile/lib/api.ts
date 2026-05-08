@@ -13,7 +13,7 @@ import type {
 
 const TOKEN_KEY = 'vibeid:token';
 
-let baseUrl = 'http://192.168.100.47:4000';
+let baseUrl = 'http://192.168.100.54:4000';
 
 export function configureApi(url: string) {
   baseUrl = url.replace(/\/$/, '');
@@ -105,10 +105,10 @@ export const authApi = {
 };
 
 // ----- Archetypes -----
+// Note: there is intentionally no list-all endpoint. The catalog is
+// hidden — users discover archetypes through their reading and through
+// their friends, not as a browsable menu.
 export const archetypeApi = {
-  list(): Promise<{ archetypes: ArchetypeMeta[] }> {
-    return request('/api/archetypes');
-  },
   get(id: string): Promise<{ archetype: ArchetypeMeta }> {
     return request(`/api/archetypes/${id}`);
   },
@@ -119,10 +119,16 @@ export const archetypeApi = {
 
 // ----- Vibe -----
 export const vibeApi = {
-  async analyze(imageBase64: string, mimeType?: string): Promise<AnalyzeResponse> {
+  /**
+   * Analyze a selfie. By default this returns the user's locked-in
+   * archetype (if logged in, or if person matching kicked in). Pass
+   * `force: true` to skip the lock and run a fresh classification —
+   * useful for the "Re-read my vibe" flow on profile.
+   */
+  async analyze(imageBase64: string, opts: { mimeType?: string; force?: boolean } = {}): Promise<AnalyzeResponse> {
     return request<AnalyzeResponse>('/api/vibe/analyze', {
       method: 'POST',
-      body: { imageBase64, mimeType },
+      body: { imageBase64, mimeType: opts.mimeType, force: opts.force },
     });
   },
   history(): Promise<{ results: VibeResultJSON[] }> {

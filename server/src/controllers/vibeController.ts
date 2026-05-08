@@ -5,12 +5,16 @@ import { User } from '../models/User';
 import { ARCHETYPES, archetypeById } from '../data/archetypes';
 import { classifyImage } from '../services/groq';
 import { generateArchetypeImage } from '../services/imageGen';
+import { embedImage, cosineSim } from '../services/embed';
 import { HttpError } from '../middleware/error';
 import { config } from '../config/env';
 
 const analyzeSchema = z.object({
   imageBase64: z.string().min(1000, 'image too small'),
   mimeType: z.string().optional(),
+  // When true, ignore any prior locked-in archetype and re-classify from scratch.
+  // Costs an extra read against the daily quota.
+  force: z.boolean().optional(),
 });
 
 function startOfTodayUTC(): Date {
@@ -23,7 +27,7 @@ export async function analyzeVibe(req: Request, res: Response): Promise<void> {
   if (!parsed.success) {
     throw new HttpError(400, parsed.error.issues.map((i) => i.message).join(', '), 'validation_error');
   }
-  const { imageBase64, mimeType } = parsed.data;
+  const { imageBase64, mimeType, force } = parsed.data;
 
   // Daily quota for non-premium users
   if (req.user) {
@@ -46,7 +50,70 @@ export async function analyzeVibe(req: Request, res: Response): Promise<void> {
     ? imageBase64.replace(/^data:[^;]+;base64,/, '')
     : imageBase64;
 
-  const classification = await classifyImage(cleaned, mimeType || 'image/jpeg');
+  // Compute a face/person embedding if person matching is enabled.
+  // Skip for logged-in users — they're already deduped by identity.
+  const newEmbedding = !req.user ? await embedImage(cleaned) : null;
+
+  let classification = await classifyImage(cleaned, mimeType || 'image/jpeg');
+  let lockedIn = false;
+  let matchedFrom: string | null = null;
+
+  // Anonymous identity matching by embedding similarity.
+  if (!req.user && !force && newEmbedding) {
+    // Pull recent embedded results, in-process compare. For tens of
+    // thousands of results this is fine; later, swap to a proper
+    // vector index (Atlas Vector Search, pgvector, etc.) if needed.
+    const recent = await VibeResult.find({ userId: null, embedding: { $ne: null } })
+      .select('+embedding')
+      .sort({ createdAt: -1 })
+      .limit(2000);
+
+    let bestSim = 0;
+    let bestArche: string | null = null;
+    let bestId: string | null = null;
+    for (const r of recent) {
+      const emb = (r as unknown as { embedding: number[] | null }).embedding;
+      if (!emb) continue;
+      const sim = cosineSim(newEmbedding, emb);
+      if (sim > bestSim) {
+        bestSim = sim;
+        bestArche = r.primaryArchetype;
+        bestId = r._id.toString();
+      }
+    }
+    if (bestSim >= config.embedSimThreshold && bestArche) {
+      const lockedArche = archetypeById(bestArche);
+      if (lockedArche) {
+        lockedIn = true;
+        matchedFrom = bestId;
+        classification = {
+          ...classification,
+          primaryArchetype: lockedArche.id,
+          essenceWords: [...lockedArche.essence],
+          palette: classification.palette.length ? classification.palette : [...lockedArche.palette],
+        };
+      }
+    }
+  }
+
+  // Logged-in identity lock: same person → same archetype across photos.
+  // To get a new one, the user must explicitly pass force=true.
+  if (req.user && !force) {
+    const user = await User.findById(req.user.sub);
+    if (user && user.primaryArchetype) {
+      const lockedArche = archetypeById(user.primaryArchetype);
+      if (lockedArche) {
+        lockedIn = true;
+        classification = {
+          ...classification,
+          primaryArchetype: lockedArche.id,
+          essenceWords: [...lockedArche.essence],
+          palette: classification.palette.length ? classification.palette : [...lockedArche.palette],
+        };
+      }
+    }
+  }
+
   const arche = archetypeById(classification.primaryArchetype);
   const cardImage = arche
     ? generateArchetypeImage(arche, cleaned.slice(0, 16)).url
@@ -61,6 +128,7 @@ export async function analyzeVibe(req: Request, res: Response): Promise<void> {
     essenceWords: classification.essenceWords,
     palette: classification.palette.length ? classification.palette : (arche?.palette ?? []),
     cardImageUrl: cardImage,
+    embedding: newEmbedding,
   });
 
   if (req.user) {
@@ -77,6 +145,8 @@ export async function analyzeVibe(req: Request, res: Response): Promise<void> {
     secondaryArchetypeMeta: classification.secondaryArchetype
       ? safeArcheById(classification.secondaryArchetype)
       : null,
+    lockedIn,
+    matchedFrom,
   });
 }
 
@@ -103,10 +173,6 @@ export async function getResult(req: Request, res: Response): Promise<void> {
   });
 }
 
-export async function listArchetypes(_req: Request, res: Response): Promise<void> {
-  res.json({ archetypes: ARCHETYPES.map(safeArche) });
-}
-
 export async function getArchetype(req: Request, res: Response): Promise<void> {
   const a = archetypeById(req.params.id);
   if (!a) throw new HttpError(404, 'Archetype not found');
@@ -114,17 +180,15 @@ export async function getArchetype(req: Request, res: Response): Promise<void> {
 }
 
 export async function getDistribution(_req: Request, res: Response): Promise<void> {
-  // What % of users are each archetype
+  // Aggregate counts only — no archetype names or descriptions exposed here.
+  // The mobile app maps ids to display data via the by-id endpoint when needed.
   const all = await User.aggregate<{ _id: string; count: number }>([
     { $match: { primaryArchetype: { $ne: null } } },
     { $group: { _id: '$primaryArchetype', count: { $sum: 1 } } },
   ]);
   const total = all.reduce((s, x) => s + x.count, 0);
-  const map: Record<string, number> = {};
-  for (const a of ARCHETYPES) map[a.id] = 0;
-  for (const row of all) map[row._id] = row.count;
-  const distribution = Object.entries(map).map(([id, count]) => ({
-    id,
+  const distribution = all.map(({ _id, count }) => ({
+    id: _id,
     count,
     pct: total > 0 ? Math.round((count / total) * 1000) / 10 : 0,
   }));
@@ -132,6 +196,7 @@ export async function getDistribution(_req: Request, res: Response): Promise<voi
 }
 
 function safeArche(a: (typeof ARCHETYPES)[number]) {
+  // NOTE: signals are intentionally NOT exposed — those are internal AI cues.
   return {
     id: a.id,
     name: a.name,
